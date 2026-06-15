@@ -20512,6 +20512,9 @@ function AppContent() {
             },
             turn_detection: turnDetection,
           },
+          output: {
+            voice: "cedar",
+            },
         },
         tools,
         tool_choice: "auto",
