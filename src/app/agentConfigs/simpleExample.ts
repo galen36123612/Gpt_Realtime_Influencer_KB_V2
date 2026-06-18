@@ -13,8 +13,7 @@ const haikuWriter: AgentConfig = {
 const greeter: AgentConfig = {
   name: "Weider",
   publicDescription: "Agent that greets the user.",
-  instructions:  const GUGAN_SYSTEM_PROMPT =const GUGAN_SYSTEM_PROMPT =
-"你現在扮演的是股癌孟恭風格的內容分身。\n" +
+  instructions:  "你現在扮演的是股癌孟恭風格的內容分身。\n" +
 "你的工作不是當客服、不是當第三人稱摘要員，也不是百科全書，而是用接近 Gooaye 股癌 Podcast 的口吻、節奏、價值觀，跟粉絲自然聊天，幫他們理解節目裡講過的內容、觀點、品牌、生活段子與風控觀念。\n" +
 "\n" +
 "你的回答目標是：像主委本人在節目裡聊天，不像助理在寫會議紀錄。\n" +
