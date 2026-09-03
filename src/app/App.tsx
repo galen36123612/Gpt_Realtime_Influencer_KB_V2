@@ -22248,7 +22248,7 @@ function App() {
 
 export default App;*/
 
-//0903 testing
+// 0902 Add councilors data and villageChief data version
 
 "use client";
 
@@ -22275,7 +22275,6 @@ import {
   LOOKUP_TAIPEI_COUNCILORS_TOOL,
   LOOKUP_TAIPEI_COUNCILOR_BY_NAME_TOOL,
   TAIPEI_COUNCILOR_TOOL_INSTRUCTIONS,
-  TAIPEI_COUNCILORS,
   executeCouncilorTool,
 } from "@/app/data/councilors";
 
@@ -22379,7 +22378,6 @@ function AppContent() {
 
   const loggedEventIds = useRef<Set<string>>(new Set());
   const processedToolCallIds = useRef<Set<string>>(new Set());
-  const responseTriggeredUserTurnIds = useRef<Set<string>>(new Set());
 
   const pendingLogsRef = useRef<
     Array<{
@@ -22704,142 +22702,6 @@ function AppContent() {
     };
   }
 
-  function serializeToolOutput(toolName: string, result: any) {
-    const json = JSON.stringify(result);
-
-    // Local official tools can return enriched records. Keep the JSON valid even if
-    // a future dataset becomes unusually large; never cut raw JSON mid-object.
-    if (json.length <= 60000) return json;
-
-    return JSON.stringify({
-      ok: true,
-      truncated: true,
-      toolName,
-      originalLength: json.length,
-      preview: json.slice(0, 56000),
-      note: "Tool output exceeded 60k characters. Ask a narrower district/name query if more detail is needed.",
-    });
-  }
-
-  type ForcedLocalToolName =
-    | "lookup_taipei_village_chief"
-    | "lookup_taipei_councilors"
-    | "lookup_taipei_councilor_by_name";
-
-  function normalizeRoutingText(input: string) {
-    return String(input || "")
-      .replace(/\s+/g, "")
-      .replace(/[，。！？、,.!?：:；;「」『』（）()]/g, "");
-  }
-
-  function detectForcedLocalTool(userText: string): ForcedLocalToolName | null {
-    const normalized = normalizeRoutingText(userText);
-
-    if (!normalized || normalized === "[inaudible]") {
-      return null;
-    }
-
-    // Exact current councilor name: force the by-name Local KB.
-    const matchedCouncilor = TAIPEI_COUNCILORS.find((item) =>
-      normalized.includes(normalizeRoutingText(item.name))
-    );
-
-    if (matchedCouncilor) {
-      return "lookup_taipei_councilor_by_name";
-    }
-
-    // Village chief questions.
-    const villageChiefSignals = [
-      "里長",
-      "里辦",
-      "里辦公室",
-      "里辦公處",
-      "里長電話",
-      "里長是誰",
-    ];
-
-    if (villageChiefSignals.some((signal) => normalized.includes(signal))) {
-      return "lookup_taipei_village_chief";
-    }
-
-    // Councilor questions + common ASR variants from testing.
-    const councilorSignals = [
-      "市議員",
-      "議員",
-      "市員",
-      "師員",
-      "司機員",
-      "最年輕議員",
-      "最年長議員",
-    ];
-
-    if (councilorSignals.some((signal) => normalized.includes(signal))) {
-      return "lookup_taipei_councilors";
-    }
-
-    return null;
-  }
-
-  function triggerResponseForUserTurn(
-    userText: string,
-    turnId: string,
-    options?: {
-      fallbackInstructions?: string;
-    }
-  ) {
-    const safeTurnId =
-      turnId || `turn_${Date.now()}_${Math.random().toString(36).slice(2)}`;
-
-    if (responseTriggeredUserTurnIds.current.has(safeTurnId)) {
-      console.warn("🔁 Response already triggered for user turn:", safeTurnId);
-      return;
-    }
-
-    responseTriggeredUserTurnIds.current.add(safeTurnId);
-
-    const forcedTool = detectForcedLocalTool(userText);
-
-    const response: any = {
-      output_modalities: ["audio"],
-      tool_choice: forcedTool
-        ? {
-            type: "function",
-            name: forcedTool,
-          }
-        : "auto",
-    };
-
-    if (options?.fallbackInstructions) {
-      response.instructions = options.fallbackInstructions;
-    }
-
-    if (forcedTool) {
-      console.log("🧭 Forced local tool route:", {
-        turnId: safeTurnId,
-        userText,
-        forcedTool,
-      });
-
-      postLog({
-        role: "system",
-        content: `[LOCAL TOOL ROUTER] turn=${safeTurnId} forced=${forcedTool} user=${String(
-          userText
-        ).slice(0, 300)}`,
-        eventId: `local_tool_router_${safeTurnId}`,
-      });
-    }
-
-    sendClientEvent(
-      {
-        type: "response.create",
-        response,
-      },
-      forcedTool
-        ? `(force local tool: ${forcedTool})`
-        : "(trigger normal response)"
-    );
-  }
-
   const sendClientEvent = (eventObj: any, eventNameSuffix = "") => {
     const dc = dataChannelRef.current;
 
@@ -23091,16 +22953,7 @@ function AppContent() {
         console.log("📨 Event:", eventType);
 
         if (eventType === "session.updated") {
-          const registeredTools = Array.isArray(eventData?.session?.tools)
-            ? eventData.session.tools.map((tool: any) => tool?.name).filter(Boolean)
-            : [];
-
-          console.log("✅ Session updated", {
-            toolChoice: eventData?.session?.tool_choice,
-            registeredTools,
-          });
-          console.log("🧰 Realtime tools registered:", registeredTools);
-
+          console.log("✅ Session updated, sending welcome once");
           sendWelcomeOnce();
         }
 
@@ -23115,9 +22968,6 @@ function AppContent() {
             eventId,
             timestamp: Date.now(),
           };
-
-          // Deterministic routing happens only after STT completes.
-          triggerResponseForUserTurn(normalized, eventId);
         }
 
         if (eventType === "conversation.item.created" || eventType === "conversation.item.added") {
@@ -23143,18 +22993,10 @@ function AppContent() {
         if (eventType === "conversation.item.input_audio_transcription.failed") {
           const reason = eventData?.error || "unknown";
 
-          const failedItemId =
-            eventData.item_id || `stt_fail_${Date.now()}_${Math.random().toString(36).slice(2)}`;
-
           postLog({
             role: "system",
             content: `[STT FAILED] ${String(reason).slice(0, 200)}`,
-            eventId: failedItemId,
-          });
-
-          triggerResponseForUserTurn("", failedItemId, {
-            fallbackInstructions:
-              "剛才使用者的語音轉錄失敗。請不要猜內容，只用繁體中文簡短說：『我剛剛沒有聽清楚，可以再說一次嗎？』",
+            eventId: eventData.item_id || `stt_fail_${Date.now()}`,
           });
         }
 
@@ -23251,8 +23093,6 @@ function AppContent() {
             : [];
 
           if (functionCalls.length) {
-            console.log("🛠️ Function calls received:", functionCalls.map((c: any) => ({ name: c.name, call_id: c.call_id })));
-
             const callsToProcess = functionCalls.filter(
               (c: any) => !processedToolCallIds.current.has(c.call_id)
             );
@@ -23275,7 +23115,7 @@ function AppContent() {
                         item: {
                           type: "function_call_output",
                           call_id: call.call_id,
-                          output: serializeToolOutput(call.name, toolResult),
+                          output: JSON.stringify(toolResult).slice(0, 20000),
                         },
                       },
                       `(tool output: ${call.name})`
@@ -23287,9 +23127,6 @@ function AppContent() {
                       type: "response.create",
                       response: {
                         output_modalities: ["audio"],
-                        tool_choice: "auto",
-                        instructions:
-                          "請優先根據剛剛的 function_call_output 回答使用者。Local KB 有資料時不得改用模型記憶覆蓋；若 Local KB 明確表示需要最新驗證，才再呼叫 web_search。",
                       },
                     },
                     "(trigger response after tools)"
@@ -23551,7 +23388,6 @@ function AppContent() {
 
     loggedEventIds.current.clear();
     processedToolCallIds.current.clear();
-    responseTriggeredUserTurnIds.current.clear();
     pendingLogsRef.current.length = 0;
   }
 
@@ -23569,7 +23405,7 @@ function AppContent() {
           threshold: 0.65,
           prefix_padding_ms: 500,
           silence_duration_ms: 1000,
-          create_response: false,
+          create_response: true,
           interrupt_response: true,
         };
 
@@ -23579,22 +23415,12 @@ ${TAIPEI_VILLAGE_CHIEF_TOOL_INSTRUCTIONS}
 
 ${TAIPEI_COUNCILOR_TOOL_INSTRUCTIONS}
 
-# LOCAL OFFICIAL TOOL MANDATORY RULE
+# TOOL PRIORITY
 
-# CLIENT-SIDE FORCED ROUTING
-
-- App 端會等語音轉錄完成，再對里長／市議員題目用 response.create.tool_choice 強制指定 Local Tool。
-- 收到強制 function call 時，必須從使用者原句正確填入 district / village / name / party / sortBy 等參數。
-- Local Tool 回傳後，以 function_call_output 為事實基礎，不得再用模型記憶覆蓋姓名、黨籍、生日、聯絡方式或公開關係。
-- 如果里長查詢缺 district 或 village，應向使用者追問，不得猜。
-
-- 只要問題涉及臺北市「現任市議員」的姓名、黨籍、選區、生日、年齡、背景、學經歷、聯絡方式、政策關注、與沈伯洋的公開關係、共同活動或公開攻防，必須先呼叫 councilor local tool，不得直接靠模型記憶回答。
-- 使用者問某行政區有哪些市議員：呼叫 lookup_taipei_councilors，帶 district。
-- 使用者問某位市議員是誰、幾歲、背景、電話、Email、跟沈伯洋熟不熟／合作過什麼：呼叫 lookup_taipei_councilor_by_name，帶 name。
-- 使用者問最年輕、最年長、某黨議員、哪些議員跟沈伯洋有公開合作：呼叫 lookup_taipei_councilors，使用 party / relationshipLevel / sortBy / limit。
-- 只要問題涉及臺北市里長姓名、里辦電話、地址或現任狀態，優先呼叫 lookup_taipei_village_chief，不得靠模型記憶猜。
-- 里長查詢需要 district + village；缺一個就先向使用者確認，不要猜。
+- 使用者問台北市里長、里長電話或里辦公處時，優先呼叫 lookup_taipei_village_chief。
 - 如果本地里長資料找不到、是代理/特殊狀態，或使用者特別問「最新」「現在現任」，再呼叫 web_search 查最新官方資料。
+- 使用者問某行政區有哪些台北市議員時，優先呼叫 lookup_taipei_councilors。
+- 使用者直接問某位台北市議員的電話、Email、黨籍或選區時，優先呼叫 lookup_taipei_councilor_by_name。
 - 如果本地市議員資料找不到，或使用者特別要求「今天最新」「目前最新現任」，再呼叫 web_search，優先查臺北市議會或內政部地方公職人員資訊專區。
 - 當問題需要公司/內部文件或知識庫內容時，請先使用 file_search 檢索向量庫，並在回答中附上來源。
 - 當問題需要最新的外部資訊（新聞、價格、政策、版本更新）時，先呼叫 web_search，再用搜尋結果回答並附上來源。
@@ -23638,8 +23464,6 @@ ${TAIPEI_COUNCILOR_TOOL_INSTRUCTIONS}
 
     const tools = Array.from(toolMap.values());
 
-    console.log("🧰 Realtime tools registered:", tools.map((t: any) => t?.name).filter(Boolean));
-
     const sessionUpdateEvent = {
       type: "session.update",
       session: {
@@ -23667,10 +23491,7 @@ ${TAIPEI_COUNCILOR_TOOL_INSTRUCTIONS}
       },
     };
 
-    sendClientEvent(
-      sessionUpdateEvent,
-      "agent.tools + web_search + local_village_chief + local_councilors"
-    );
+    sendClientEvent(sessionUpdateEvent, "agent.tools + web_search + village_chief + councilors");
   };
 
   const cancelAssistantSpeech = async () => {
@@ -23716,7 +23537,15 @@ ${TAIPEI_COUNCILOR_TOOL_INSTRUCTIONS}
 
     setUserText("");
 
-    triggerResponseForUserTurn(textToSend, eventId);
+    sendClientEvent(
+      {
+        type: "response.create",
+        response: {
+          output_modalities: ["audio"],
+        },
+      },
+      "(trigger response)"
+    );
   };
 
   const handleTalkButtonDown = () => {
@@ -23741,8 +23570,15 @@ ${TAIPEI_COUNCILOR_TOOL_INSTRUCTIONS}
 
     sendClientEvent({ type: "input_audio_buffer.commit" }, "commit PTT");
 
-    // Wait for conversation.item.input_audio_transcription.completed.
-    // That event will call triggerResponseForUserTurn() and force Local KB when needed.
+    sendClientEvent(
+      {
+        type: "response.create",
+        response: {
+          output_modalities: ["audio"],
+        },
+      },
+      "trigger response PTT"
+    );
   };
 
   const handleMicrophoneClick = () => {
